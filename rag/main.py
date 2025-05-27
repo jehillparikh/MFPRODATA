@@ -3,7 +3,7 @@ Portfolio RAG API
 
 This module implements a FastAPI-based Retrieval Augmented Generation (RAG) system
 for portfolio data analysis. It provides endpoints for document upload, semantic search,
-and health monitoring.
+and enhanced chatbot interaction with streaming support.
 
 The API uses FAISS for efficient vector similarity search and Sentence Transformers
 for generating text embeddings.
@@ -19,14 +19,19 @@ Example:
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uvicorn
 from rag.utils.embeddings import get_embeddings
 from rag.utils.vector_store import add_to_vector_store, search_vector_store
 from rag.utils.file_processor import process_file
+from rag.utils.enhanced_chatbot import EnhancedChatbot
 import os
+import json
+import asyncio
 
+# Initialize FastAPI app
 app = FastAPI(
     title="Portfolio RAG API",
     description="API for Retrieval Augmented Generation on Portfolio Data",
@@ -40,6 +45,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Placeholder for LLM function - replace with actual LLM implementation
+async def llm_fn(prompt: str) -> str:
+    """Placeholder LLM function that returns a simple response."""
+    return f"This is a placeholder response for: {prompt}"
+
+# Initialize enhanced chatbot
+chatbot = EnhancedChatbot(
+    get_embeddings_fn=get_embeddings,
+    search_vector_store_fn=search_vector_store,
+    llm_fn=llm_fn
 )
 
 class QueryRequest(BaseModel):
@@ -63,6 +80,30 @@ class QueryResponse(BaseModel):
     """
     matches: List[dict]
     query_embedding: List[float]
+
+class ChatRequest(BaseModel):
+    """
+    Request model for the chat endpoint.
+    
+    Attributes:
+        message (str): The user's message
+        session_id (str, optional): Session identifier for conversation continuity
+    """
+    message: str
+    session_id: Optional[str] = None
+
+class ChatResponse(BaseModel):
+    """
+    Response model for the chat endpoint.
+    
+    Attributes:
+        response (str): The chatbot's response
+        session_id (str): The session identifier
+        conversation_history (List[Dict[str, Any]]): The current conversation history
+    """
+    response: str
+    session_id: str
+    conversation_history: List[Dict[str, Any]]
 
 @app.post("/upload", tags=["Document Management"])
 async def upload_file(file: UploadFile = File(...)):
@@ -152,6 +193,86 @@ async def query(request: QueryRequest):
             "matches": matches,
             "query_embedding": query_embedding.tolist()
         }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat", tags=["Chat"])
+async def chat(request: ChatRequest):
+    """
+    Chat with the enhanced RAG-powered chatbot.
+    
+    This endpoint provides a streaming interface to the chatbot. The response
+    is streamed back to the client as it's generated, with proper handling
+    of conversation history and session management.
+    
+    Args:
+        request (ChatRequest): The chat request containing the user's message
+            and optional session ID
+        
+    Returns:
+        StreamingResponse: A streaming response containing the generated text
+        
+    Raises:
+        HTTPException: If chat processing fails
+        
+    Example:
+        ```bash
+        curl -X POST "http://localhost:8000/chat" \\
+             -H "Content-Type: application/json" \\
+             -d '{"message": "What are the top holdings?", "session_id": "optional-session-id"}'
+        ```
+        
+    Note:
+        The response is streamed as newline-delimited JSON objects, where each
+        object contains a 'token' field with the next piece of generated text.
+    """
+    try:
+        async def generate():
+            async for token in chatbot.get_streaming_response(
+                request.message,
+                request.session_id
+            ):
+                yield json.dumps({"token": token}) + "\n"
+        
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson"
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat/reset", tags=["Chat"])
+async def reset_chat(session_id: str):
+    """
+    Reset a chat session.
+    
+    This endpoint clears the conversation history and memory for a specific
+    session. If the session doesn't exist, returns an error.
+    
+    Args:
+        session_id (str): The session to reset
+        
+    Returns:
+        dict: A success message
+        
+    Raises:
+        HTTPException: If the session doesn't exist
+        
+    Example:
+        ```bash
+        curl -X POST "http://localhost:8000/chat/reset?session_id=your-session-id"
+        ```
+    """
+    try:
+        if chatbot.reset_session(session_id):
+            return {"message": "Session reset successfully"}
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found"
+            )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
