@@ -8,11 +8,15 @@ def combine_portfolio_files():
     The combined file will be saved in the upload directory with a timestamp.
     """
     # Create upload and portfolio directories if they don't exist
-    upload_dir = os.path.join(os.getcwd(), "upload")
+    upload_dir = os.path.join(os.getcwd(), "uploads")
     portfolio_dir = os.path.join(upload_dir, "portfolio")
     
-    os.makedirs(upload_dir, exist_ok=True)
-    os.makedirs(portfolio_dir, exist_ok=True)
+    print(f"📂 Upload Directory: {upload_dir}")  
+    print(f"📂 Portfolio Directory: {portfolio_dir}")
+    
+
+    #os.makedirs(upload_dir, exist_ok=True)
+    #os.makedirs(portfolio_dir, exist_ok=True)
 
     # Get all Excel files from the portfolio directory
     excel_files = []
